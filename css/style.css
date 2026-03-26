@@ -226,7 +226,8 @@ body {
 }
 
 /* Inputs */
-input[type="text"] {
+input[type="text"],
+select {
     width: 100%;
     background: #0d0d12;
     border: 1px solid var(--glass-border);
@@ -234,6 +235,13 @@ input[type="text"] {
     padding: 0.75rem;
     color: white;
     font-size: 0.95rem;
+    outline: none;
+    cursor: pointer;
+}
+
+select option {
+    background: var(--bg-panel);
+    color: white;
 }
 
 input[type="range"] {

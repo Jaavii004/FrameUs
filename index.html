@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FrameUs</title>
     <link rel="stylesheet" href="css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Montserrat:wght@900&display=swap" rel="stylesheet">
     <script src="lib/fabric.min.js"></script>
     <script src="js/script.js" defer></script>
 </head>
@@ -66,6 +67,18 @@
                 <label>Número o Palabra</label>
                 <input type="text" id="mask-text" value="18" placeholder="Ej: 18, 21, HOLA">
                 <p class="hint">Define la forma del collage</p>
+            </div>
+            <div class="control-group">
+                <label>Fuente</label>
+                <select id="font-family">
+                    <option value="Inter" selected>Inter (Moderno)</option>
+                    <option value="Montserrat">Montserrat (Grueso Pro)</option>
+                    <option value="Impact">Impact (Clásico Grueso)</option>
+                    <option value="Arial">Arial (Sencillo)</option>
+                    <option value="Georgia">Georgia (Serif)</option>
+                    <option value="'Courier New', Courier, monospace">Monoespaciado</option>
+                    <option value="'Times New Roman', Times, serif">Clásico</option>
+                </select>
             </div>
         </div>
 
