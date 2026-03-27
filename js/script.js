@@ -24,6 +24,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let isHistoryLocked = false;
     let bgTextObj = null;
 
+    // Crop State
+    let isCropMode = false;
+    let cropRect = null;
+
     // 3. Mask & Overlay 
     async function updateOverlay(text = '18') {
         if (!text) text = ' ';
@@ -120,6 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             fabric.Image.fromURL(tempCanvas.toDataURL(), (img) => {
                 img.set({ selectable: false, evented: false });
+                if (isCropMode) img.set('opacity', 0.15); // Respect crop mode if updated during crop
                 canvas.setOverlayImage(img, canvas.renderAll.bind(canvas));
             });
         }
@@ -176,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 5. Interaction Logic
     function updateToolbar() {
         const active = canvas.getActiveObject();
-        if (active && active.type === 'image') {
+        if (active && active.type === 'image' && !isCropMode) {
             contextToolbar.style.display = 'flex';
             opacitySlider.value = (active.opacity || 1) * 100;
         } else {
@@ -339,6 +344,102 @@ document.addEventListener('DOMContentLoaded', () => {
         if (active) { active.set('opacity', e.target.value / 100); canvas.renderAll(); }
     });
 
+    // 7.5 Crop Tool Logic
+    let targetCropImage = null;
+
+    function startCrop() {
+        const active = canvas.getActiveObject();
+        if (!active || active.type !== 'image' || isCropMode) return;
+        
+        targetCropImage = active;
+        isCropMode = true;
+
+        // Visual setup: Fade the mask to see the whole image
+        const bg = canvas.overlayImage;
+        if (bg) bg.set('opacity', 0.15);
+
+        cropRect = new fabric.Rect({
+            left: active.left,
+            top: active.top,
+            width: active.getScaledWidth() * 0.8,
+            height: active.getScaledHeight() * 0.8,
+            originX: 'center',
+            originY: 'center',
+            fill: 'rgba(255, 255, 255, 0.3)',
+            stroke: '#8b5cf6',
+            strokeWidth: 2,
+            strokeDashArray: [5, 5],
+            cornerColor: '#8b5cf6',
+            cornerStyle: 'circle',
+            transparentCorners: false,
+            hasRotationPoint: false
+        });
+
+        canvas.discardActiveObject();
+        canvas.add(cropRect);
+        canvas.setActiveObject(cropRect);
+        
+        document.getElementById('crop-actions').style.display = 'flex';
+        document.getElementById('btn-crop').style.display = 'none';
+        document.getElementById('selection-controls').style.display = 'none';
+        canvas.renderAll();
+    }
+
+    function finalizeCrop() {
+        if (!targetCropImage || !cropRect) return;
+
+        // Calculation
+        const rect = cropRect.getBoundingRect();
+        const img = targetCropImage;
+        
+        // Relative position
+        const relX = (cropRect.left - img.left) / img.scaleX + img.width / 2 - cropRect.getScaledWidth() / (2 * img.scaleX);
+        const relY = (cropRect.top - img.top) / img.scaleY + img.height / 2 - cropRect.getScaledHeight() / (2 * img.scaleY);
+        
+        const newWidth = cropRect.getScaledWidth() / img.scaleX;
+        const newHeight = cropRect.getScaledHeight() / img.scaleY;
+
+        img.set({
+            cropX: (img.cropX || 0) + relX,
+            cropY: (img.cropY || 0) + relY,
+            width: newWidth,
+            height: newHeight
+        });
+
+        img.setCoords();
+        exitCropMode();
+        saveState();
+    }
+
+    function exitCropMode() {
+        if (cropRect) canvas.remove(cropRect);
+        if (canvas.overlayImage) canvas.overlayImage.set('opacity', 1);
+        
+        isCropMode = false;
+        cropRect = null;
+        targetCropImage = null;
+
+        document.getElementById('crop-actions').style.display = 'none';
+        document.getElementById('btn-crop').style.display = 'flex';
+        updateToolbar();
+        canvas.renderAll();
+    }
+
+    document.getElementById('btn-crop').addEventListener('click', startCrop);
+    document.getElementById('btn-crop-confirm').addEventListener('click', finalizeCrop);
+    document.getElementById('btn-crop-cancel').addEventListener('click', exitCropMode);
+
+    canvas.on('mouse:dblclick', (options) => {
+        if (options.target) {
+            if (options.target.type === 'image' && !isCropMode) {
+                canvas.setActiveObject(options.target);
+                startCrop();
+            } else if (options.target === cropRect && isCropMode) {
+                finalizeCrop();
+            }
+        }
+    });
+
     // 8. Upload Logic
     document.getElementById('image-upload').addEventListener('change', (e) => {
         const files = Array.from(e.target.files);
@@ -396,6 +497,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.ctrlKey || e.metaKey) {
             if (e.key === 'z') { e.preventDefault(); undo(); }
             if (e.key === 'y') { e.preventDefault(); redo(); }
+        }
+        if (e.key === 'Escape' && isCropMode) {
+            exitCropMode();
         }
     });
 
