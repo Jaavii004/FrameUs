@@ -5,7 +5,9 @@ document.addEventListener('DOMContentLoaded', () => {
         height: 800,
         backgroundColor: null, // Start transparent
         preserveObjectStacking: true,
-        controlsAboveOverlay: true
+        controlsAboveOverlay: true,
+        imageSmoothingEnabled: true,
+        imageSmoothingQuality: 'high'
     });
 
     // 2. UI References
@@ -23,6 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let redoStack = [];
     let isHistoryLocked = false;
     let bgTextObj = null;
+
+    // Quality Settings
+    const EXPORT_SCALE = 5; // 800 * 5 = 4000px
 
     // Crop State
     let isCropMode = false;
@@ -73,41 +78,17 @@ document.addEventListener('DOMContentLoaded', () => {
             // SOLID/GRADIENT MODE: Use Overlay Image with a Punched Hole
             canvas.clipPath = null;
             const tempCanvas = document.createElement('canvas');
-            tempCanvas.width = 800;
-            tempCanvas.height = 800;
+            tempCanvas.width = 800 * EXPORT_SCALE;
+            tempCanvas.height = 800 * EXPORT_SCALE;
             const ctx = tempCanvas.getContext('2d');
 
             // Draw current background
+            let bgColor = '#121217'; // Default fallback
             if (typeof currentBg === 'string' && !currentBg.includes('gradient')) {
-                ctx.fillStyle = currentBg;
-            } else {
-                ctx.fillStyle = '#121217'; // Fallback for gradients (handled by canvas itself)
+                bgColor = currentBg;
             }
-            ctx.fillRect(0, 0, 800, 800);
-
-            // Prepare Text Mask
-            const baseSize = 500;
-            ctx.font = `900 ${baseSize}px ${font}, sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-
-            let metrics = ctx.measureText(text.toUpperCase());
-            let actualWidth = metrics.width + (charSpacing * (text.length - 1));
-            let scale = Math.min(720 / actualWidth, 1);
-
-            ctx.save();
-            ctx.translate(400, 350);
-            ctx.scale(scale, scale);
-            ctx.globalCompositeOperation = 'destination-out';
-
-            let currentX = -actualWidth / 2;
-            for (let i = 0; i < text.length; i++) {
-                const char = text[i].toUpperCase();
-                const charWidth = ctx.measureText(char).width;
-                ctx.fillText(char, currentX + charWidth / 2, 0);
-                currentX += charWidth + charSpacing;
-            }
-            ctx.restore();
+            ctx.fillStyle = bgColor;
+            ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
 
             // Apply Texture to BACKGROUND
             if (currentTexture !== 'none') {
@@ -117,14 +98,41 @@ document.addEventListener('DOMContentLoaded', () => {
                     const pattern = ctx.createPattern(texImg, 'repeat');
                     ctx.fillStyle = pattern;
                     ctx.globalAlpha = 0.45;
-                    ctx.fillRect(0, 0, 800, 800);
+                    ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
                     ctx.globalAlpha = 1;
                 }
             }
 
+            // Punch the hole at high res
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.font = `900 ${500 * EXPORT_SCALE}px ${font}`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.letterSpacing = `${charSpacing * 10 * EXPORT_SCALE}px`;
+            
+            // Calculate text width at high resolution to scale correctly
+            const tempText = new fabric.Text(text.toUpperCase(), {
+                fontSize: 500 * EXPORT_SCALE,
+                fontFamily: font,
+                charSpacing: charSpacing * 10 * EXPORT_SCALE
+            });
+            const actualWidth = tempText.width;
+            const scale = Math.min((720 * EXPORT_SCALE) / actualWidth, 1);
+
+            ctx.save();
+            ctx.translate(400 * EXPORT_SCALE, 350 * EXPORT_SCALE);
+            ctx.scale(scale, scale);
+            ctx.fillText(text.toUpperCase(), 0, 0); // Draw at 0,0 after translation
+            ctx.restore();
+
             fabric.Image.fromURL(tempCanvas.toDataURL(), (img) => {
-                img.set({ selectable: false, evented: false });
-                if (isCropMode) img.set('opacity', 0.15); // Respect crop mode if updated during crop
+                img.set({ 
+                    selectable: false, 
+                    evented: false,
+                    scaleX: 1 / EXPORT_SCALE,
+                    scaleY: 1 / EXPORT_SCALE
+                });
+                if (isCropMode) img.set('opacity', 0.15);
                 canvas.setOverlayImage(img, canvas.renderAll.bind(canvas));
             });
         }
@@ -466,12 +474,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 9. Download
     document.getElementById('btn-download').addEventListener('click', () => {
-        // Ensure high-quality export with transparency
-        const multiplier = 2;
+        // Ensure ultra-high-quality export (4000x4000)
+        const multiplier = EXPORT_SCALE;
 
         canvas.discardActiveObject().renderAll();
 
-        // Final export to PNG
         const dataURL = canvas.toDataURL({
             format: 'png',
             multiplier: multiplier,
