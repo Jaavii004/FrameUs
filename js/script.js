@@ -18,41 +18,72 @@ document.addEventListener('DOMContentLoaded', () => {
     const contextToolbar = document.getElementById('selection-controls');
     const opacitySlider = document.getElementById('input-opacity');
     const dropZone = document.querySelector('.canvas-viewport');
-    
+
     // 3. Mask Setup (THE PROFESSIONAL METHOD)
     canvas.controlsAboveOverlay = true;
 
-    function updateOverlay(text) {
-        if (!text) text = ' ';
-        text = text.toUpperCase();
-        const font = fontSelector.value;
-        let fontSize = text.length > 5 ? 200 : (text.length > 2 ? 350 : 550);
+    function getMaskObject(text, font, fontSize) {
+        // Calculate final font size to fit width
+        const tCanvas = document.createElement('canvas');
+        const tCtx = tCanvas.getContext('2d');
+        tCtx.font = `900 ${fontSize}px ${font}, sans-serif`;
+        let tWidth = tCtx.measureText(text).width;
+        let adjustedFontSize = fontSize;
+        if (tWidth > 680) {
+            adjustedFontSize *= (680 / tWidth);
+        }
 
-        // Create the "Punch-hole" image synchronously
+        return new fabric.Text(text.toUpperCase(), {
+            fontSize: adjustedFontSize,
+            fontWeight: 900,
+            fontFamily: font,
+            textAlign: 'center',
+            originX: 'center',
+            originY: 'center',
+            left: 400,
+            top: 320,
+            lineHeight: 1, // Crucial for vertical alignment consistency
+            absolutePositioned: true,
+            fill: 'white' // Only matters for rendering to temp canvas
+        });
+    }
+
+    async function updateOverlay(text) {
+        if (!text) text = ' ';
+        // Ensure fonts are loaded for accurate measurement
+        await document.fonts.ready;
+
+        const font = fontSelector.value;
+        const baseFontSize = text.length > 5 ? 200 : (text.length > 2 ? 350 : 550);
+        const maskObj = getMaskObject(text, font, baseFontSize);
+
         const tempCanvas = document.createElement('canvas');
         tempCanvas.width = 800;
         tempCanvas.height = 800;
         const ctx = tempCanvas.getContext('2d');
 
-        // Dynamically adjust font size to fit width (Conservative limit: 680px)
-        ctx.font = `900 ${fontSize}px ${font}, sans-serif`;
-        let currentWidth = ctx.measureText(text).width;
-        if (currentWidth > 680) {
-            fontSize *= (680 / currentWidth);
-            ctx.font = `900 ${fontSize}px ${font}, sans-serif`;
-        }
-
-        ctx.fillStyle = '#121217'; // Match editor bg
+        ctx.fillStyle = '#121217';
         ctx.fillRect(0, 0, 800, 800);
+
         ctx.globalCompositeOperation = 'destination-out';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(text, 400, 320); // Center-top position
+
+        // CRITICAL: Disable retina scaling on the static canvas used for rendering the mask
+        const staticCanvas = new fabric.StaticCanvas(null, {
+            width: 800,
+            height: 800,
+            enableRetinaByDevicePixelRatio: false
+        });
+        staticCanvas.add(maskObj);
+        staticCanvas.renderAll();
+
+        ctx.drawImage(staticCanvas.lowerCanvasEl, 0, 0);
 
         fabric.Image.fromURL(tempCanvas.toDataURL(), (img) => {
             img.set({ selectable: false, evented: false });
             canvas.setOverlayImage(img, canvas.renderAll.bind(canvas));
         });
+
+        staticCanvas.dispose();
     }
 
     updateOverlay('18');
@@ -80,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isEditingCrop) return;
         isEditingCrop = true;
         cropTarget = img;
-        
+
         // 1. Semi-transparent mask for better context
         if (canvas.overlayImage) {
             canvas.overlayImage.opacity = 0.25;
@@ -94,7 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hasRotatingPoint: false,
             opacity: 0.85
         });
-        
+
         const status = document.createElement('div');
         status.id = 'crop-status';
         status.innerHTML = 'MODO ENCUADRE: Arrastra la foto para ajustarla dentro del número. Doble clic para terminar.';
@@ -105,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function exitCropMode() {
         if (!isEditingCrop || !cropTarget) return;
-        
+
         // 1. Restore solid mask
         if (canvas.overlayImage) {
             canvas.overlayImage.opacity = 1;
@@ -304,90 +335,91 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('btn-clear').addEventListener('click', () => {
-        if(confirm('¿Borrar todo?')) { canvas.getObjects().forEach(obj => { if(obj !== bgText) canvas.remove(obj); }); updateLayersList(); }
-    });    document.getElementById('btn-download').addEventListener('click', () => {
+        if (confirm('¿Borrar todo?')) { canvas.getObjects().forEach(obj => { if (obj !== bgText) canvas.remove(obj); }); updateLayersList(); }
+    }); document.getElementById('btn-download').addEventListener('click', async () => {
         const text = (maskInput.value || '18').toUpperCase();
         const font = fontSelector.value;
-        const multiplier = 4; // 4x for extreme quality (3200px base)
-        let fontSize = text.length > 5 ? 200 : (text.length > 2 ? 350 : 550);
+        const multiplier = 4;
+        const baseFontSize = text.length > 5 ? 200 : (text.length > 2 ? 350 : 550);
 
-        // 1. Calculate final font size
-        const tCanvas = document.createElement('canvas');
-        const tCtx = tCanvas.getContext('2d');
-        tCtx.font = `900 ${fontSize}px ${font}, sans-serif`;
-        let tWidth = tCtx.measureText(text).width;
-        if (tWidth > 680) {
-            fontSize *= (680 / tWidth);
-        }
+        // Ensure fonts are ready for accurate layout
+        await document.fonts.ready;
 
-        // 2. Prepare Clipping Mask with Absolute Positioning
-        const exportClip = new fabric.Text(text, {
-            fontSize: fontSize,
-            fontWeight: 900,
-            fontFamily: font,
-            textAlign: 'center',
-            originX: 'center', 
-            originY: 'center',
-            left: 400, 
-            top: 320,
-            absolutePositioned: true // CRITICAL: This ensures it stays fixed during exports
-        });
-
-        // 3. Save original state and prepare for export
+        // 1. Prepare Export State
         const oldOverlay = canvas.overlayImage;
         const oldBG = canvas.backgroundColor;
-
         canvas.setOverlayImage(null);
-        canvas.clipPath = exportClip;
         canvas.renderAll();
 
-        // 4. Generate FULL high-res image (3200x3200)
-        const fullDataURL = canvas.toDataURL({ 
+        // 2. Export Raw High-Res Pixels (Unmasked)
+        const rawDataURL = canvas.toDataURL({
             format: 'png',
-            quality: 1,
             multiplier: multiplier,
-            enableRetinaByDevicePixelRatio: false // Keep it predictable
+            enableRetinaByDevicePixelRatio: false
         });
 
-        // 5. Restore editor immediately
-        canvas.clipPath = null;
-        canvas.setBackgroundColor(oldBG);
-        canvas.setOverlayImage(oldOverlay, canvas.renderAll.bind(canvas));
-
-        // 6. Post-Crop using 2D Canvas for perfect tight fit
         const img = new Image();
         img.onload = () => {
-            const rect = exportClip.getBoundingRect();
-            const pad = 20; // Tight padding
+            const finalW = 800 * multiplier;
+            const finalH = 800 * multiplier;
 
-            // Correct crop bounds: compute start and end, then derive width/height
-            const startX = Math.max(0, rect.left - pad);
-            const startY = Math.max(0, rect.top - pad);
-            const endX = Math.min(800, rect.left + rect.width + pad);
-            const endY = Math.min(800, rect.top + rect.height + pad);
+            const processCanvas = document.createElement('canvas');
+            processCanvas.width = finalW;
+            processCanvas.height = finalH;
+            const pCtx = processCanvas.getContext('2d');
 
-            const cropX = startX * multiplier;
-            const cropY = startY * multiplier;
-            const cropW = (endX - startX) * multiplier;
-            const cropH = (endY - startY) * multiplier;
+            // Draw the raw unmasked high-res imagery
+            pCtx.drawImage(img, 0, 0);
+
+            // 3. Create Manual High-Res Mask at same scale
+            const exportMask = getMaskObject(text, font, baseFontSize);
+            exportMask.set({
+                scaleX: multiplier,
+                scaleY: multiplier,
+                left: 400 * multiplier,
+                top: 320 * multiplier
+            });
+
+            const maskStatic = new fabric.StaticCanvas(null, {
+                width: finalW,
+                height: finalH,
+                enableRetinaByDevicePixelRatio: false
+            });
+            maskStatic.add(exportMask);
+            maskStatic.renderAll();
+
+            // 4. Apply Mask using 'destination-in' (Keep intersection)
+            pCtx.globalCompositeOperation = 'destination-in';
+            pCtx.drawImage(maskStatic.lowerCanvasEl, 0, 0);
+
+            // 5. Final Precise Crop to mask boundaries
+            const rect = exportMask.getBoundingRect();
+            const pad = 20 * multiplier;
+
+            const cropX = Math.max(0, rect.left - pad);
+            const cropY = Math.max(0, rect.top - pad);
+            const cropW = Math.min(finalW, rect.width + pad * 2);
+            const cropH = Math.min(finalH, rect.height + pad * 2);
 
             const finalCanvas = document.createElement('canvas');
             finalCanvas.width = cropW;
             finalCanvas.height = cropH;
             const finalCtx = finalCanvas.getContext('2d');
-            
-            // Draw only the mask area from the 4x export
-            finalCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+            finalCtx.drawImage(processCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-            // Final Download
+            // 6. Trigger Download
             const link = document.createElement('a');
-            link.download = `FrameUs-${text}-PQ.png`;
+            link.download = `FrameUs-${text}-Premium.png`;
             link.href = finalCanvas.toDataURL('image/png', 1.0);
             link.click();
+
+            // Cleanup & Restore UI
+            canvas.setOverlayImage(oldOverlay, canvas.renderAll.bind(canvas));
+            maskStatic.dispose();
         };
-        img.src = fullDataURL;
+        img.src = rawDataURL;
     });
-;
+    ;
 
     function resize() {
         const viewport = document.querySelector('.canvas-viewport');
