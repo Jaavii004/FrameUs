@@ -16,8 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const gradBtns = document.querySelectorAll('.grad-btn');
     const uploadedGrid = document.getElementById('uploaded-images-grid');
     const contextToolbar = document.getElementById('selection-controls');
-    const opacitySlider = document.getElementById('input-opacity');
-    const dropZone = document.querySelector('.canvas-viewport');
+    // Zoom UI refs (DEPRECATED - using visual crop box now)
+    const zoomSlider = document.getElementById('input-zoom');
+    const zoomContainer = document.getElementById('zoom-control');
+    const zoomDivider = document.getElementById('zoom-divider');
 
     // 3. Mask Setup (THE PROFESSIONAL METHOD)
     canvas.controlsAboveOverlay = true;
@@ -103,62 +105,119 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // 5. Crop & Move Logic
+    // 5. Crop & Move Logic (LITERAL CROP BOX)
     let isEditingCrop = false;
     let cropTarget = null;
+    let cropSelector = null;
 
     function enterCropMode(img) {
         if (isEditingCrop) return;
         isEditingCrop = true;
         cropTarget = img;
+        
+        // Disable other UI
+        if (zoomContainer) zoomContainer.style.display = 'none';
+        if (zoomDivider) zoomDivider.style.display = 'none';
+        if (canvas.overlayImage) canvas.overlayImage.opacity = 0.1;
+        
+        const currentVisW = img.width * img.scaleX;
+        const currentVisH = img.height * img.scaleY;
+        const currentLeft = img.left;
+        const currentTop = img.top;
 
-        // 1. Semi-transparent mask for better context
-        if (canvas.overlayImage) {
-            canvas.overlayImage.opacity = 0.25;
-        }
-
-        canvas.bringToFront(img);
+        const fullW = img._originalElement.width;
+        const fullH = img._originalElement.height;
+        
+        const dx = (img.cropX + img.width / 2 - fullW / 2) * img.scaleX;
+        const dy = (img.cropY + img.height / 2 - fullH / 2) * img.scaleY;
 
         img.set({
-            borderColor: '#10b981',
+            cropX: 0, cropY: 0,
+            width: fullW, height: fullH,
+            left: currentLeft - dx,
+            top: currentTop - dy,
+            opacity: 0.3,
+            selectable: false,
+            evented: false
+        });
+        
+        cropSelector = new fabric.Rect({
+            left: currentLeft,
+            top: currentTop,
+            width: currentVisW / img.scaleX, 
+            height: currentVisH / img.scaleY,
+            scaleX: img.scaleX,
+            scaleY: img.scaleY,
+            originX: 'center',
+            originY: 'center',
+            fill: 'rgba(255,255,255,0.1)',
+            stroke: '#10b981',
+            strokeWidth: 2,
+            strokeDashArray: [5, 5],
             cornerColor: '#10b981',
+            cornerStyle: 'circle',
+            transparentCorners: false,
+            borderColor: '#10b981',
             hasRotatingPoint: false,
-            opacity: 0.85
+            angle: img.angle
         });
 
+        canvas.add(cropSelector);
+        canvas.setActiveObject(cropSelector);
+        
         const status = document.createElement('div');
         status.id = 'crop-status';
-        status.innerHTML = 'MODO ENCUADRE: Arrastra la foto para ajustarla dentro del número. Doble clic para terminar.';
-        status.style = 'position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#10b981; color:white; padding:12px 24px; border-radius:30px; z-index:10000; font-weight:700; box-shadow: 0 10px 25px rgba(0,0,0,0.3);';
+        status.innerHTML = '✂️ MODO RECORTE: Ajusta el recuadro verde y haz DOBLE CLIC para aplicar';
+        status.style = 'position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:#10b981; color:white; padding:12px 24px; border-radius:12px; z-index:999999; font-weight:700; box-shadow: 0 10px 40px rgba(0,0,0,0.6); font-family: sans-serif;';
         document.body.appendChild(status);
+        
         canvas.renderAll();
     }
 
     function exitCropMode() {
-        if (!isEditingCrop || !cropTarget) return;
+        if (!isEditingCrop || !cropTarget || !cropSelector) return;
+        
+        const img = cropTarget;
+        const sel = cropSelector;
+        
+        // Disable deprecated UI
+        if (zoomContainer) zoomContainer.style.display = 'none';
+        if (zoomDivider) zoomDivider.style.display = 'none';
+        const scaleX = img.scaleX;
+        const scaleY = img.scaleY;
+        const dx = (sel.left - img.left) / scaleX;
+        const dy = (sel.top - img.top) / scaleY;
+        const newWidth = (sel.width * sel.scaleX) / scaleX;
+        const newHeight = (sel.height * sel.scaleY) / scaleY;
+        const newCropX = (img.width / 2) + dx - (newWidth / 2);
+        const newCropY = (img.height / 2) + dy - (newHeight / 2);
 
-        // 1. Restore solid mask
-        if (canvas.overlayImage) {
-            canvas.overlayImage.opacity = 1;
-        }
-
-        cropTarget.set({
-            borderColor: '#8b5cf6',
-            cornerColor: '#8b5cf6',
-            hasRotatingPoint: true,
-            opacity: 1
+        img.set({
+            cropX: Math.max(0, newCropX),
+            cropY: Math.max(0, newCropY),
+            width: newWidth,
+            height: newHeight,
+            left: sel.left,
+            top: sel.top,
+            opacity: 1,
+            selectable: true,
+            evented: true
         });
 
+        if (canvas.overlayImage) canvas.overlayImage.opacity = 1;
+
+        canvas.remove(sel);
         const status = document.getElementById('crop-status');
         if (status) status.remove();
 
         isEditingCrop = false;
         cropTarget = null;
+        cropSelector = null;
         canvas.renderAll();
     }
 
     canvas.on('mouse:dblclick', (options) => {
-        if (options.target && options.target.type === 'image') {
+        if (options.target && (options.target.type === 'image' || options.target === cropSelector)) {
             if (isEditingCrop) exitCropMode();
             else enterCropMode(options.target);
         } else if (isEditingCrop) {
@@ -167,18 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     canvas.on('object:moving', (e) => {
-        const img = e.target;
-        if (isEditingCrop && img === cropTarget) {
-            const deltaX = img.left - (img.lastLeft || img.left);
-            const deltaY = img.top - (img.lastTop || img.top);
-
-            img.cropX = (img.cropX || 0) - (deltaX / img.scaleX);
-            img.cropY = (img.cropY || 0) - (deltaY / img.scaleY);
-
-            img.left = img.lastLeft;
-            img.top = img.lastTop;
-            canvas.renderAll();
-        }
+        // Normal movement
     });
 
     canvas.on('mouse:down', (e) => {
@@ -187,6 +235,8 @@ document.addEventListener('DOMContentLoaded', () => {
             e.target.lastTop = e.target.top;
         }
     });
+
+    // 5.5 Zoom Logic Deprecated
 
     // 6. Background Control
     bgColorPicker.addEventListener('input', (e) => {
