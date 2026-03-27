@@ -4,7 +4,8 @@ document.addEventListener('DOMContentLoaded', () => {
         width: 800,
         height: 800,
         backgroundColor: null, // Start transparent
-        preserveObjectStacking: true
+        preserveObjectStacking: true,
+        controlsAboveOverlay: true
     });
 
     // 2. UI References
@@ -26,79 +27,102 @@ document.addEventListener('DOMContentLoaded', () => {
     // 3. Mask & Overlay 
     async function updateOverlay(text = '18') {
         if (!text) text = ' ';
-        // Removed await document.fonts.ready for speed/stability
+        await document.fonts.ready;
         const font = fontSelector.value;
         const charSpacing = parseInt(charSpacingInput.value) || 0;
-        
-        // Update Ghost Text (Background Text)
+
+        // Update Ghost Text (Behind everything - optional hint)
         if (!bgTextObj) {
             bgTextObj = new fabric.IText(text, {
-                left: 400, top: 400, originX: 'center', originY: 'center',
+                left: 400, top: 350, originX: 'center', originY: 'center',
                 fontSize: 500, fontFamily: font, fontWeight: 900,
                 fill: 'rgba(255,255,255,0.05)', selectable: false, evented: false
             });
-            canvas.insertAt(bgTextObj, 0); // Always at bottom
+            canvas.insertAt(bgTextObj, 0); 
         }
         bgTextObj.set({ text: text.toUpperCase(), fontFamily: font, charSpacing: charSpacing * 10 });
         const scaleBg = Math.min(750 / bgTextObj.width, 1);
         bgTextObj.set({ scaleX: scaleBg, scaleY: scaleBg });
 
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = 800;
-        tempCanvas.height = 800;
-        const ctx = tempCanvas.getContext('2d');
+        // Logic for Transparent vs Solid Background
+        const currentBg = canvas.backgroundColor;
+        const isTransparent = !currentBg || currentBg === 'transparent' || currentBg === 'null';
 
-        // Draw solid background
-        ctx.fillStyle = '#121217';
-        ctx.fillRect(0, 0, 800, 800);
+        if (isTransparent) {
+            // TRANSPARENCY MODE: Use ClipPath for entire canvas
+            canvas.setOverlayImage(null, canvas.renderAll.bind(canvas));
+            
+            const clipText = new fabric.Text(text.toUpperCase(), {
+                left: 400, top: 350, originX: 'center', originY: 'center',
+                fontSize: 500, fontFamily: font, fontWeight: 900,
+                charSpacing: charSpacing * 10,
+                absolutePositioned: true
+            });
+            
+            const metrics = canvas.getContext().measureText(text.toUpperCase());
+            const scale = Math.min(720 / (clipText.width), 1);
+            clipText.set({ scaleX: scale, scaleY: scale });
+            
+            canvas.clipPath = clipText;
+            canvas.renderAll();
+        } else {
+            // SOLID/GRADIENT MODE: Use Overlay Image with a Punched Hole
+            canvas.clipPath = null;
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = 800;
+            tempCanvas.height = 800;
+            const ctx = tempCanvas.getContext('2d');
 
-        // Prepare Text Mask
-        const baseSize = text.length > 5 ? 200 : (text.length > 2 ? 300 : 500);
-        ctx.font = `900 ${baseSize}px ${font}, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        // Auto-scale font if too wide
-        let metrics = ctx.measureText(text.toUpperCase());
-        let actualWidth = metrics.width + (charSpacing * (text.length - 1));
-        let scale = 1;
-        if (actualWidth > 720) scale = 720 / actualWidth;
-        
-        ctx.save();
-        ctx.translate(400, 400); // True center
-        ctx.scale(scale, scale);
-        
-        // PUNCH THE HOLE
-        ctx.globalCompositeOperation = 'destination-out';
-        
-        // Draw characters individually for spacing
-        let currentX = -actualWidth / 2;
-        for (let i = 0; i < text.length; i++) {
-            const char = text[i].toUpperCase();
-            const charWidth = ctx.measureText(char).width;
-            ctx.fillText(char, currentX + charWidth / 2, 0);
-            currentX += charWidth + charSpacing;
-        }
-
-        ctx.restore();
-
-        // Apply Texture to BACKGROUND (not the hole)
-        if (currentTexture !== 'none') {
-            const texImg = await loadTextureImage(currentTexture);
-            if (texImg) {
-                ctx.globalCompositeOperation = 'source-atop';
-                const pattern = ctx.createPattern(texImg, 'repeat');
-                ctx.fillStyle = pattern;
-                ctx.globalAlpha = 0.45;
-                ctx.fillRect(0, 0, 800, 800);
-                ctx.globalAlpha = 1;
+            // Draw current background
+            if (typeof currentBg === 'string' && !currentBg.includes('gradient')) {
+                ctx.fillStyle = currentBg;
+            } else {
+                ctx.fillStyle = '#121217'; // Fallback for gradients (handled by canvas itself)
             }
-        }
+            ctx.fillRect(0, 0, 800, 800);
 
-        fabric.Image.fromURL(tempCanvas.toDataURL(), (img) => {
-            img.set({ selectable: false, evented: false });
-            canvas.setOverlayImage(img, canvas.renderAll.bind(canvas));
-        });
+            // Prepare Text Mask
+            const baseSize = 500;
+            ctx.font = `900 ${baseSize}px ${font}, sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            let metrics = ctx.measureText(text.toUpperCase());
+            let actualWidth = metrics.width + (charSpacing * (text.length - 1));
+            let scale = Math.min(720 / actualWidth, 1);
+
+            ctx.save();
+            ctx.translate(400, 350);
+            ctx.scale(scale, scale);
+            ctx.globalCompositeOperation = 'destination-out';
+
+            let currentX = -actualWidth / 2;
+            for (let i = 0; i < text.length; i++) {
+                const char = text[i].toUpperCase();
+                const charWidth = ctx.measureText(char).width;
+                ctx.fillText(char, currentX + charWidth / 2, 0);
+                currentX += charWidth + charSpacing;
+            }
+            ctx.restore();
+
+            // Apply Texture to BACKGROUND
+            if (currentTexture !== 'none') {
+                const texImg = await loadTextureImage(currentTexture);
+                if (texImg) {
+                    ctx.globalCompositeOperation = 'source-atop';
+                    const pattern = ctx.createPattern(texImg, 'repeat');
+                    ctx.fillStyle = pattern;
+                    ctx.globalAlpha = 0.45;
+                    ctx.fillRect(0, 0, 800, 800);
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            fabric.Image.fromURL(tempCanvas.toDataURL(), (img) => {
+                img.set({ selectable: false, evented: false });
+                canvas.setOverlayImage(img, canvas.renderAll.bind(canvas));
+            });
+        }
     }
 
     function loadTextureImage(type) {
@@ -203,7 +227,7 @@ document.addEventListener('DOMContentLoaded', () => {
     maskInput.addEventListener('input', () => { updateOverlay(maskInput.value); saveState(); });
     fontSelector.addEventListener('change', () => { updateOverlay(maskInput.value); saveState(); });
     charSpacingInput.addEventListener('input', () => { updateOverlay(maskInput.value); saveState(); });
-    
+
     document.querySelectorAll('.texture-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('active-texture'));
@@ -215,27 +239,33 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     bgColorPicker.addEventListener('input', (e) => {
-        canvas.setBackgroundColor(e.target.value, canvas.renderAll.bind(canvas));
-        saveState();
-    });
-
-    document.querySelectorAll('.grad-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            canvas.setBackgroundColor(btn.dataset.grad, canvas.renderAll.bind(canvas));
+        canvas.setBackgroundColor(e.target.value, () => {
+            updateOverlay(maskInput.value);
+            canvas.renderAll();
             saveState();
         });
     });
 
-    // Add a "Transparent" button logic if needed - for now, clear background
-    const btnTransparent = document.createElement('button');
-    btnTransparent.className = 'btn btn-outline-light btn-sm';
-    btnTransparent.innerText = 'Fondo Transparente';
-    btnTransparent.style.marginTop = '10px';
-    btnTransparent.onclick = () => {
-        canvas.setBackgroundColor(null, canvas.renderAll.bind(canvas));
-        saveState();
-    };
-    document.getElementById('tab-background').appendChild(btnTransparent);
+    document.querySelectorAll('.grad-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            canvas.setBackgroundColor(btn.dataset.grad, () => {
+                updateOverlay(maskInput.value);
+                canvas.renderAll();
+                saveState();
+            });
+        });
+    });
+
+    const btnSetTransparent = document.getElementById('btn-set-transparent');
+    if (btnSetTransparent) {
+        btnSetTransparent.onclick = () => {
+            canvas.setBackgroundColor(null, () => {
+                updateOverlay(maskInput.value);
+                canvas.renderAll();
+                saveState();
+            });
+        };
+    }
 
     document.getElementById('btn-clear').addEventListener('click', () => {
         if (confirm('¿Borrar todo?')) {
@@ -252,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const active = canvas.getActiveObject();
         if (!active || active.type !== 'image') return;
         const scale = Math.max(700 / active.width, 600 / active.height) * 1.1;
-        active.set({ scaleX: scale, scaleY: scale, left: 400, top: 320, originX: 'center', originY: 'center', angle: 0 });
+        active.set({ scaleX: scale, scaleY: scale, left: 400, top: 350, originX: 'center', originY: 'center', angle: 0 });
         canvas.renderAll(); saveState();
     });
 
@@ -336,10 +366,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // 9. Download
     document.getElementById('btn-download').addEventListener('click', () => {
         // Ensure high-quality export with transparency
-        const multiplier = 2; 
-        
+        const multiplier = 2;
+
         canvas.discardActiveObject().renderAll();
-        
+
         // Final export to PNG
         const dataURL = canvas.toDataURL({
             format: 'png',
@@ -347,12 +377,12 @@ document.addEventListener('DOMContentLoaded', () => {
             quality: 1,
             enableRetinaScaling: true
         });
-        
+
         const link = document.createElement('a');
         link.download = `FrameUs-${maskInput.value || '18'}-${Date.now()}.png`;
         link.href = dataURL;
         link.click();
-        
+
         updateToolbar();
     });
 
@@ -371,5 +401,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
     updateOverlay('18');
     setTimeout(saveState, 500);
-    console.log('FrameUs Fully Restored & Premium Ready');
 });
