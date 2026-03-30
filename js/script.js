@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let redoStack = [];
     let isHistoryLocked = false;
     let bgTextObj = null;
+    let uploadedImages = []; // Track uploaded image dataURLs for persistence
 
     // Quality Settings
     const EXPORT_SCALE = 5; // 800 * 5 = 4000px
@@ -41,7 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const charSpacing = parseInt(charSpacingInput.value) || 0;
 
         // Update Ghost Text (Behind everything - optional hint)
-        if (!bgTextObj) {
+        // Check if bgTextObj exists AND is still on the canvas
+        if (!bgTextObj || !canvas.contains(bgTextObj)) {
             bgTextObj = new fabric.IText(text, {
                 left: 400, top: 350, originX: 'center', originY: 'center',
                 fontSize: 500, fontFamily: font, fontWeight: 900,
@@ -168,6 +170,18 @@ document.addEventListener('DOMContentLoaded', () => {
         historyStack.push(JSON.stringify(canvas.toJSON()));
         redoStack = [];
         if (historyStack.length > 50) historyStack.shift();
+
+        // 5.b Persist to IndexedDB
+        storage.saveProject(
+            JSON.stringify(canvas.toJSON()),
+            uploadedImages,
+            {
+                maskText: maskInput.value,
+                fontFamily: fontSelector.value,
+                charSpacing: charSpacingInput.value,
+                currentTexture: currentTexture
+            }
+        ).catch(err => console.error("Error persistent save:", err));
     }
 
     function undo() {
@@ -212,7 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, { crossOrigin: 'anonymous' });
     }
 
-    function addImageToGrid(src) {
+    function addImageToGrid(src, isRecovery = false) {
         const item = document.createElement('div');
         item.className = 'grid-item';
         item.style.backgroundImage = `url(${src})`;
@@ -220,7 +234,11 @@ document.addEventListener('DOMContentLoaded', () => {
         item.style.backgroundPosition = 'center';
         item.addEventListener('click', () => addImageToCanvas(src));
         uploadedGrid.prepend(item);
-        addImageToCanvas(src);
+        
+        if (!isRecovery) {
+            uploadedImages.unshift(src); // Add to persistence list
+            addImageToCanvas(src);
+        }
     }
 
     // 6. Navigation Tabs
@@ -280,13 +298,50 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 
-    document.getElementById('btn-clear').addEventListener('click', () => {
-        if (confirm('¿Borrar todo?')) {
-            canvas.getObjects().forEach(o => canvas.remove(o));
+    const btnClear = document.getElementById('btn-clear');
+    if (btnClear) {
+        btnClear.addEventListener('click', () => resetProject('¿Borrar todo el proyecto y las fotos subidas?'));
+    }
+
+    const btnNewProject = document.getElementById('btn-new-project');
+    if (btnNewProject) {
+        btnNewProject.addEventListener('click', () => resetProject('¿Crear un nuevo proyecto? Se borrará todo el trabajo actual y las fotos.'));
+    }
+
+    async function resetProject(confirmMessage) {
+        if (confirm(confirmMessage)) {
+            isHistoryLocked = true;
+            
+            // 1. Clear Canvas and internal objects
+            canvas.clear(); 
+            bgTextObj = null;
+            
+            // 2. Clear persistence lists
+            uploadedImages = [];
+            uploadedGrid.innerHTML = '';
+            
+            // 3. Reset History
+            historyStack = [];
+            redoStack = [];
+            
+            // 4. Reset UI Inputs
+            maskInput.value = '18';
+            fontSelector.value = 'Inter';
+            charSpacingInput.value = 0;
+            currentTexture = 'none';
+            document.querySelectorAll('.texture-btn').forEach(b => b.classList.remove('active-texture'));
+            
             updateLayersList();
+            await storage.clearProject();
+            
+            // 5. Re-initialize
+            updateOverlay('18');
+            isHistoryLocked = false;
             saveState();
+            
+            console.log("FrameUs: Proyecto reseteado por completo.");
         }
-    });
+    }
 
     // Toolbar Buttons
     document.getElementById('btn-undo').addEventListener('click', undo);
@@ -510,6 +565,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    updateOverlay('18');
-    setTimeout(saveState, 500);
+    // 11. Recovery System
+    async function recoverSession() {
+        try {
+            const savedData = await storage.loadProject();
+            if (savedData) {
+                console.log("FrameUs: Intentando recuperar sesión...");
+                
+                // Restore Metadata/UI settings
+                if (savedData.meta) {
+                    maskInput.value = savedData.meta.maskText || '18';
+                    fontSelector.value = savedData.meta.fontFamily || 'Inter';
+                    charSpacingInput.value = savedData.meta.charSpacing || 0;
+                    currentTexture = savedData.meta.currentTexture || 'none';
+                    
+                    // Update active texture UI
+                    document.querySelectorAll('.texture-btn').forEach(b => {
+                        b.classList.toggle('active-texture', b.dataset.texture === currentTexture);
+                    });
+                }
+
+                // Restore Image Grid
+                if (savedData.galleryImages) {
+                    uploadedImages = savedData.galleryImages;
+                    // Sort by reverse to prepend in correct order
+                    [...uploadedImages].reverse().forEach(src => addImageToGrid(src, true));
+                }
+
+                // Load Canvas State
+                isHistoryLocked = true;
+                canvas.loadFromJSON(savedData.canvasJson, () => {
+                    canvas.renderAll();
+                    updateOverlay(maskInput.value);
+                    isHistoryLocked = false;
+                    updateLayersList();
+                    console.log("FrameUs: Sesión recuperada.");
+                });
+            } else {
+                updateOverlay('18');
+            }
+        } catch (e) {
+            console.error("FrameUs: Error recuperando sesión", e);
+            updateOverlay('18');
+        }
+    }
+
+    recoverSession();
+    setTimeout(saveState, 1000);
 });
