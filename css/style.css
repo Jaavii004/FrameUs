@@ -79,11 +79,31 @@ body {
 /* Side Panel */
 .side-panel {
     width: var(--panel-width);
+    height: 100vh;
     background-color: var(--bg-panel);
     border-right: 1px solid var(--glass-border);
     padding: 1.5rem;
     overflow-y: auto;
+    scrollbar-gutter: stable;
     z-index: 90;
+}
+
+/* Premium Scrollbar */
+.side-panel::-webkit-scrollbar {
+    width: 6px;
+}
+
+.side-panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.side-panel::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+
+.side-panel::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
 }
 
 .panel-content {
@@ -357,25 +377,79 @@ input[type="range"] {
 }
 
 .layer-item {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid var(--glass-border);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
+    backdrop-filter: blur(8px);
+    border-radius: 12px;
+    padding: 0.6rem 0.75rem;
     cursor: pointer;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    transition: all 0.2s;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    margin-bottom: 0.25rem;
 }
 
 .layer-item:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.3);
+    transform: translateX(4px);
+}
+
+.layer-active {
     border-color: var(--accent-primary);
+    background: rgba(139, 92, 246, 0.1);
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.2);
+}
+
+.layer-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.layer-thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    background-size: cover;
+    background-position: center;
+    background-color: #0d0d12;
+    border: 1px solid var(--glass-border);
+}
+
+.text-thumb {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    color: var(--accent-primary);
+    font-size: 0.8rem;
 }
 
 .layer-item span {
-    font-size: 0.9rem;
-    font-weight: 500;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.btn-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    padding: 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-delete:hover {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--danger);
+    transform: scale(1.1);
 }
 
 /* Texture Grid & Buttons */

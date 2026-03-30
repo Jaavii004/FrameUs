@@ -47,7 +47,15 @@ document.addEventListener('DOMContentLoaded', () => {
             bgTextObj = new fabric.IText(text, {
                 left: 400, top: 350, originX: 'center', originY: 'center',
                 fontSize: 500, fontFamily: font, fontWeight: 900,
-                fill: 'rgba(255,255,255,0.05)', selectable: false, evented: false
+                fill: 'rgba(255,255,255,0.05)', 
+                selectable: false, 
+                evented: false,
+                excludeFromExport: true,
+                lockMovementX: true,
+                lockMovementY: true,
+                lockRotation: true,
+                lockScalingX: true,
+                lockScalingY: true
             });
             canvas.insertAt(bgTextObj, 0); 
         }
@@ -131,8 +139,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 img.set({ 
                     selectable: false, 
                     evented: false,
+                    excludeFromExport: true,
                     scaleX: 1 / EXPORT_SCALE,
-                    scaleY: 1 / EXPORT_SCALE
+                    scaleY: 1 / EXPORT_SCALE,
+                    lockMovementX: true,
+                    lockMovementY: true,
+                    lockRotation: true,
+                    lockScalingX: true,
+                    lockScalingY: true
                 });
                 if (isCropMode) img.set('opacity', 0.15);
                 canvas.setOverlayImage(img, canvas.renderAll.bind(canvas));
@@ -149,18 +163,49 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 4. Layers & State
     function updateLayersList() {
         const list = document.getElementById('layers-list');
         if (!list) return;
         list.innerHTML = '';
-        const objects = canvas.getObjects().reverse();
+
+        const activeObject = canvas.getActiveObject();
+        const objects = canvas.getObjects().filter(o => o !== bgTextObj).reverse();
+        
         objects.forEach((obj, idx) => {
             const item = document.createElement('div');
-            item.className = 'layer-item';
-            item.innerHTML = `<span>Capa ${objects.length - idx}</span><button class="btn-delete">×</button>`;
-            item.querySelector('.btn-delete').onclick = (e) => { e.stopPropagation(); canvas.remove(obj); updateLayersList(); saveState(); };
-            item.onclick = () => { canvas.setActiveObject(obj); canvas.renderAll(); };
+            item.className = `layer-item ${obj === activeObject ? 'layer-active' : ''}`;
+            
+            // Generate a small thumbnail if it's an image
+            let thumb = '';
+            if (obj.type === 'image') {
+                thumb = `<div class="layer-thumb" style="background-image: url(${obj.getSrc()})"></div>`;
+            } else {
+                thumb = `<div class="layer-thumb text-thumb">T</div>`;
+            }
+
+            item.innerHTML = `
+                <div class="layer-info">
+                    ${thumb}
+                    <span>Capa ${objects.length - idx}</span>
+                </div>
+                <button class="btn-delete" title="Eliminar Capa">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                        <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z" />
+                    </svg>
+                </button>
+            `;
+
+            item.querySelector('.btn-delete').onclick = (e) => { 
+                e.stopPropagation(); 
+                canvas.remove(obj); 
+                updateLayersList(); 
+                saveState(); 
+            };
+            
+            item.onclick = () => { 
+                canvas.setActiveObject(obj); 
+                canvas.renderAll(); 
+            };
             list.appendChild(item);
         });
     }
@@ -550,10 +595,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 10. Initialization
-    canvas.on('selection:created', updateToolbar);
-    canvas.on('selection:updated', updateToolbar);
-    canvas.on('selection:cleared', updateToolbar);
+    canvas.on('selection:created', () => { updateToolbar(); updateLayersList(); });
+    canvas.on('selection:updated', () => { updateToolbar(); updateLayersList(); });
+    canvas.on('selection:cleared', () => { updateToolbar(); updateLayersList(); });
     canvas.on('object:modified', saveState);
+    canvas.on('object:added', updateLayersList);
+    canvas.on('object:removed', updateLayersList);
 
     window.addEventListener('keydown', (e) => {
         if (e.ctrlKey || e.metaKey) {
